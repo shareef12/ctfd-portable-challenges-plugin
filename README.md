@@ -2,7 +2,7 @@
 
 Compatable with CTFd v1.2.0
 
-This plugin provides the ability to import and export challneges in a portable, human-readble format (currently YAML, with JSON if there is popular demand). 
+This plugin provides the ability to import and export challneges in a portable, human-readble format (currently YAML, with JSON if there is popular demand).
 
 ### Objectives:
 * Allow challenges to be saved outside of the database
@@ -17,7 +17,7 @@ Simple clone this repsitory into the plugins folder of your CTFd deployment and 
 You can use this plugin through the web API with a front-end at the '/admin/transfer' enpoint, or through the CLI
 
 #### Web endpoints:
-There are two endpoints which are associated with this plugin. 
+There are two endpoints which are associated with this plugin.
 
 * '/admin/yaml': This is where the file transfer takes place. It supports two methods.
   * `GET`: Will send, as an attachment, a compressed tarball archive containing all of the currently configured challenges and their files
@@ -63,8 +63,8 @@ optional arguments:
 ```
 
 #### YAML Specification:
-Each challenge is a single document. Multiple documents can be present in one YAML file, separated by “---”, as specified by YAML 1.1. 
- 
+Each challenge is a single document. Multiple documents can be present in one YAML file, separated by “---”, as specified by YAML 1.1.
+
 Following is a list of top level keys with their usage.
 
 **name**
@@ -75,6 +75,10 @@ Following is a list of top level keys with their usage.
 * Type: Single line text
 * Usage: Specify the category the challenge will appear a part of
 
+**value**
+* Type: Positive integer
+* Usage: The amount of point awarded for completion of the problem
+
 **description**
 * Type: Multiline text
 * Usage: The the body text of the challenge. If HTML tags are used, they will be rendered.
@@ -84,11 +88,6 @@ Following is a list of top level keys with their usage.
 * Usage: Specify searchable tags that indicate attributes of this challenge
 * Default: Empty list
 
-
-**value** 
-* Type: Positive integer
-* Usage: The amount of point awarded for completion of the problem
-
 **files** (optional)
 * Type: List of file paths (single line text)
 * Usage: Specify paths to static files which should be included in challenge. On import these files will be uploaded. The filenames will remain the same on upload put the directories in the path will be replaced with a single directory with a random hexadecimal name. The file paths should be relative to the YAML file by default, but this can be changed by using command line arguments with the import tool.
@@ -96,7 +95,7 @@ Following is a list of top level keys with their usage.
 
 **flags**
 * Type: List of flag objects
-  
+
   **flag**
   * Type: Single line text
   * Usage: The flag/key text

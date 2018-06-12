@@ -4,15 +4,15 @@ from flask import Flask
 from sqlalchemy_utils import database_exists, create_database
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError
-from werkzeug.utils import secure_filename
+from werkzeug.datastructures import FileStorage
+from CTFd import utils
 
 import yaml
-import shutil
+
+import argparse
+import hashlib
 import os
 import sys
-import hashlib
-import argparse
-
 
 REQ_FIELDS = ['name', 'description', 'value', 'category', 'flags']
 
@@ -52,7 +52,39 @@ class MissingFieldError(Exception):
         self.name = name
 
     def __str__(self):
-        return "Error: Missing field '{}'".format(self.name)
+        return "Missing field '{}'".format(self.name)
+
+
+def validate_yaml(chal):
+    """Ensure all required fields are present."""
+
+    for req_field in REQ_FIELDS:
+        if req_field not in chal:
+            raise MissingFieldError(req_field)
+
+    chal['name'] = chal['name'].strip()
+    chal['description'] = chal['description'].strip()
+    chal['category'] = chal['category'].strip()
+
+    # Set defaults for optional types
+    if 'type' in chal:
+        chal['type'] = chal['type'].strip()
+    else:
+        chal['type'] = 'standard'
+
+    if 'tags' not in chal:
+        chal['tags'] = []
+    if 'files' not in chal:
+        chal['files'] = []
+    if 'hidden' not in chal:
+        chal['hidden'] = False
+
+    for flag in chal['flags']:
+        if 'flag' not in flag:
+            raise MissingFieldError('flag')
+        flag['flag'] = flag['flag'].strip()
+        if 'type' not in flag:
+            flag['type'] = 'static'
 
 
 def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
@@ -61,143 +93,90 @@ def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
         chals = yaml.safe_load_all(in_stream)
 
         for chal in chals:
-            skip = False
-            for req_field in REQ_FIELDS:
-                if req_field not in chal:
-                    if exit_on_error:
-                        raise MissingFieldError(req_field)
-                    else:
-                        print "Skipping challenge: Missing field '{}'".format(req_field)
-                        skip = True
-                        break
-            if skip:
-                continue
+            # ensure all required fields are present before adding or updating a challenge
+            try:
+                validate_yaml(chal)
+            except MissingFieldError as err:
+                if exit_on_error:
+                    raise
+                else:
+                    print "Skipping challenge: " + str(err)
+                    continue
 
-            for flag in chal['flags']:
-                if 'flag' not in flag:
-                    if exit_on_error:
-                        raise MissingFieldError('flag')
-                    else:
-                        print "Skipping flag: Missing field 'flag'"
-                        continue
-                flag['flag'] = flag['flag'].strip()
-                if 'type' not in flag:
-                    flag['type'] = 'static'
-
-            # We ignore trailing and leading whitespace when importing challenges
-            # If the challenge already exists, update it
-            chal_dbobj = Challenges.query.filter_by(name=chal['name']).first()
-            if chal_dbobj is not None:
-                chal_dbobj.description = chal['description'].strip()
-                chal_dbobj.value = chal['value']
-                chal_dbobj.category = chal['category'].strip()
+            # if the challenge already exists, update it
+            chal_db = Challenges.query.filter_by(name=chal['name']).first()
+            if chal_db is not None:
+                print "Updating {}".format(chal['name'].encode('utf8'))
+                chal_db.description = chal['description']
+                chal_db.value = chal['value']
+                chal_db.category = chal['category']
             else:
-                chal_dbobj = Challenges(
-                    chal['name'].strip(),
-                    chal['description'].strip(),
+                print "Adding {}".format(chal['name'].encode('utf8'))
+                chal_db = Challenges(
+                    chal['name'],
+                    chal['description'],
                     chal['value'],
-                    chal['category'].strip()
-                )
+                    chal['category'])
+            chal_db.type = chal['type']
+            chal_db.hidden = chal['hidden']
 
-            if 'type' in chal:
-                chal_dbobj.type = chal['type'].strip()
-
-            if 'hidden' in chal and chal['hidden']:
-                chal_dbobj.hidden = True
-
-            matching_chals = Challenges.query.filter_by(
-                name=chal_dbobj.name,
-                description=chal_dbobj.description,
-                value=chal_dbobj.value,
-                category=chal_dbobj.category,
-                hidden=chal_dbobj.hidden
-            ).all()
-
-            for match in matching_chals:
-                if 'tags' in chal:
-                    tags_db = [tag.tag for tag in Tags.query.add_columns('tag').filter_by(chal=match.id).all()]
-                    if all([tag not in tags_db for tag in chal['tags']]):
-                        continue
-                if 'files' in chal:
-                    files_db = [f.location for f in Files.query.add_columns('location').filter_by(chal=match.id).all()]
-                    if len(files_db) != len(chal['files']):
-                        continue
-
-                    hashes = []
-                    for file_db in files_db:
-                        with open(os.path.join(dst_attachments, file_db), 'r') as f:
-                            hash = hashlib.md5(f.read()).digest()
-                            hashes.append(hash)
-
-                    mismatch = False
-                    for file in chal['files']:
-                        filepath = os.path.join(os.path.dirname(in_file), file)
-                        with open(filepath, 'r') as f:
-                            hash = hashlib.md5(f.read()).digest()
-                            if hash in hashes:
-                                hashes.remove(hash)
-                            else:
-                                mismatch = True
-                                break
-                    if mismatch:
-                        continue
-
-                flags_db = Keys.query.filter_by(chal=match.id).all()
-                for flag in chal['flags']:
-                    for flag_db in flags_db:
-                        if flag['flag'] != flag_db.flag:
-                            continue
-                        if flag['type'] != flag_db.type:
-                            continue
-
-                skip = True
-                break
-            if skip:
-                print "Skipping {}: Duplicate challenge found in DB".format(chal['name'].encode('utf8'))
-                continue
-
-            print "Adding {}".format(chal['name'].encode('utf8'))
-            db.session.add(chal_dbobj)
+            db.session.add(chal_db)
             db.session.commit()
 
-            if 'tags' in chal:
-                for tag in chal['tags']:
-                    tag_dbobj = Tags(chal_dbobj.id, tag)
-                    db.session.add(tag_dbobj)
+            # delete all tags and re-add them
+            Tags.query.filter_by(chal=chal_db.id).delete()
+            for tag in chal['tags']:
+                tag_dbobj = Tags(chal_db.id, tag)
+                db.session.add(tag_dbobj)
 
+            # delete all flags and re-add them
+            Keys.query.filter_by(chal=chal_db.id).delete()
             for flag in chal['flags']:
-                flag_db = Keys(chal_dbobj.id, flag['flag'], flag['type'])
+                flag_db = Keys(chal_db.id, flag['flag'], flag['type'])
                 db.session.add(flag_db)
 
-            if 'files' in chal:
-                for file in chal['files']:
-                    filename = os.path.basename(file)
-                    dst_filename = secure_filename(filename)
+            # hash and compare existing files with the new uploaded files
+            hashes_db = {}
+            files_db = Files.query.filter_by(chal=chal_db.id).all()
+            for file_db in files_db:
+                with open(os.path.join(dst_attachments, file_db.location), 'rb') as f:
+                    h = hashlib.md5(f.read()).digest()
+                    hashes_db[h] = file_db
 
-                    dst_dir = None
-                    while not dst_dir or os.path.exists(dst_dir):
-                        md5hash = hashlib.md5(os.urandom(64)).hexdigest()
-                        dst_dir = os.path.join(dst_attachments, md5hash)
+            to_upload = []
+            for file in chal['files']:
+                path = os.path.join(os.path.dirname(in_file), file)
+                with open(path, "rb") as f:
+                    h = hashlib.md5(f.read()).digest()
+                if h in hashes_db and os.path.basename(file) == os.path.basename(hashes_db[h].location):
+                    # the file is up to date
+                    del hashes_db[h]
+                else:
+                    # the file has changed name or content
+                    to_upload.append(path)
 
-                    os.makedirs(dst_dir)
-                    dstpath = os.path.join(dst_dir, dst_filename)
-                    srcpath = os.path.join(os.path.dirname(in_file), file)
+            # remove out of date files and add new uploads
+            for file_db in hashes_db.values():
+                print "  Removing file {}".format(file_db.location)
+                utils.delete_file(file_db.id)
+            for path in to_upload:
+                basename = os.path.basename(path)
+                print "  Adding file {}".format(basename)
+                with open(path, "rb") as f:
+                    f = FileStorage(stream=f, filename=basename)
+                    utils.upload_file(file=f, chalid=chal_db.id)
+                if move:
+                    os.unlink(path)
 
-                    if move:
-                        shutil.move(srcpath, dstpath)
-                    else:
-                        shutil.copy(srcpath, dstpath)
-                    file_dbobj = Files(chal_dbobj.id, os.path.relpath(dstpath, start=dst_attachments))
-
-                    db.session.add(file_dbobj)
+            db.session.commit()
 
     db.session.commit()
     db.session.close()
-        
+
 
 if __name__ == "__main__":
     args = parse_args()
-    
+
     app = Flask(__name__)
 
     with app.app_context():
