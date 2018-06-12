@@ -6,8 +6,6 @@ from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError
 from werkzeug.utils import secure_filename
 
-import json
-import hashlib
 import yaml
 import shutil
 import os
@@ -18,6 +16,7 @@ import argparse
 
 REQ_FIELDS = ['name', 'description', 'value', 'category', 'flags']
 
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Import CTFd challenges and their attachments to a DB from a YAML formated specification file and an associated attachment directory')
     parser.add_argument('--app-root', dest='app_root', type=str, help="app_root directory for the CTFd Flask app (default: 2 directories up from this script)", default=None)
@@ -27,6 +26,7 @@ def parse_args():
     parser.add_argument('--skip-on-error', dest="exit_on_error", action='store_false', help="If set, the importer will skip the importing challenges which have errors rather than halt.", default=True)
     parser.add_argument('--move', dest="move", action='store_true', help="if set the import proccess will move files rather than copy them", default=False)
     return parser.parse_args()
+
 
 def process_args(args):
     if not (args.db_uri and args.dst_attachments):
@@ -46,6 +46,7 @@ def process_args(args):
 
     return args
 
+
 class MissingFieldError(Exception):
     def __init__(self, name):
         self.name = name
@@ -56,7 +57,6 @@ class MissingFieldError(Exception):
 
 def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
     from CTFd.models import db, Challenges, Keys, Tags, Files
-    chals = []
     with open(in_file, 'r') as in_stream:
         chals = yaml.safe_load_all(in_stream)
 
@@ -85,12 +85,19 @@ def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
                     flag['type'] = 'static'
 
             # We ignore trailing and leading whitespace when importing challenges
-            chal_dbobj = Challenges(
-                chal['name'].strip(),
-                chal['description'].strip(),
-                chal['value'],
-                chal['category'].strip()
-            )
+            # If the challenge already exists, update it
+            chal_dbobj = Challenges.query.filter_by(name=chal['name']).first()
+            if chal_dbobj is not None:
+                chal_dbobj.description = chal['description'].strip()
+                chal_dbobj.value = chal['value']
+                chal_dbobj.category = chal['category'].strip()
+            else:
+                chal_dbobj = Challenges(
+                    chal['name'].strip(),
+                    chal['description'].strip(),
+                    chal['value'],
+                    chal['category'].strip()
+                )
 
             if 'type' in chal:
                 chal_dbobj.type = chal['type'].strip()
@@ -162,7 +169,6 @@ def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
                 flag_db = Keys(chal_dbobj.id, flag['flag'], flag['type'])
                 db.session.add(flag_db)
 
-
             if 'files' in chal:
                 for file in chal['files']:
                     filename = os.path.basename(file)
@@ -193,7 +199,6 @@ if __name__ == "__main__":
     args = parse_args()
     
     app = Flask(__name__)
-
 
     with app.app_context():
         args = process_args(args)
