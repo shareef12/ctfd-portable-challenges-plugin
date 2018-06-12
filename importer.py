@@ -48,9 +48,11 @@ def process_args(args):
 
 class MissingFieldError(Exception):
     def __init__(self, name):
-        self.name = value
+        self.name = name
+
     def __str__(self):
-        return "Error: Missing field '{}'".format(name)
+        return "Error: Missing field '{}'".format(self.name)
+
 
 def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
     from CTFd.models import db, Challenges, Keys, Tags, Files
@@ -79,18 +81,19 @@ def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
                         print "Skipping flag: Missing field 'flag'"
                         continue
                 flag['flag'] = flag['flag'].strip()
-                if 'type' in flag == "REGEX":
-                    flag['type'] = 1
-                else:
-                    flag['type'] = 0
+                if 'type' not in flag:
+                    flag['type'] = 'static'
 
-            # We ignore traling and leading whitespace when importing challenges
+            # We ignore trailing and leading whitespace when importing challenges
             chal_dbobj = Challenges(
                 chal['name'].strip(),
                 chal['description'].strip(),
                 chal['value'],
                 chal['category'].strip()
             )
+
+            if 'type' in chal:
+                chal_dbobj.type = chal['type'].strip()
 
             if 'hidden' in chal and chal['hidden']:
                 chal_dbobj.hidden = True
@@ -137,7 +140,7 @@ def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
                     for flag_db in flags_db:
                         if flag['flag'] != flag_db.flag:
                             continue
-                        if flag['type'] != flag_db.key_type:
+                        if flag['type'] != flag_db.type:
                             continue
 
                 skip = True

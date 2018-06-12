@@ -1,6 +1,6 @@
 # Portable Challenges Plugin
 
-Compatable with CTFd v1.0.0
+Compatable with CTFd v1.2.0
 
 This plugin provides the ability to import and export challneges in a portable, human-readble format (currently YAML, with JSON if there is popular demand). 
 
@@ -102,10 +102,14 @@ Following is a list of top level keys with their usage.
   * Usage: The flag/key text
 
   **type** (optional)
-  * Type: Enum {REGEX, PLAINTEXT}
+  * Type: Enum {static, regex}
   * Usage: Specify whether the text should be compared to what the user enters directly, or as a regular expression
-  * Default: PLAINTEXT
+  * Default: static
 
+**type** (optional)
+* Type: Single line text
+* Usage: Specify the challenge type as a python class name
+* Default: standard
 
 **hidden** (optional)
 * Type: Boolean {true, false}
