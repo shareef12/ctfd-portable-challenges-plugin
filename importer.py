@@ -78,6 +78,8 @@ def validate_yaml(chal):
         chal['files'] = []
     if 'hidden' not in chal:
         chal['hidden'] = False
+    if 'hints' not in chal:
+        chal['hints'] = []
 
     for flag in chal['flags']:
         if 'flag' not in flag:
@@ -86,9 +88,17 @@ def validate_yaml(chal):
         if 'type' not in flag:
             flag['type'] = 'static'
 
+    for hint in chal['hints']:
+        if 'hint' not in hint:
+            import pdb; pdb.set_trace()
+            raise MissingFieldError('hint')
+        if 'cost' not in hint:
+            raise MissingFieldError('cost')
+        hint['hint'] = hint['hint'].strip()
+
 
 def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
-    from CTFd.models import db, Challenges, Keys, Tags, Files
+    from CTFd.models import db, Challenges, Keys, Tags, Files, Hints, Unlocks
     with open(in_file, 'r') as in_stream:
         chals = yaml.safe_load_all(in_stream)
 
@@ -134,6 +144,27 @@ def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
             for flag in chal['flags']:
                 flag_db = Keys(chal_db.id, flag['flag'], flag['type'])
                 db.session.add(flag_db)
+
+            # delete or update existing hints
+            hints = {h['id']: h for h in chal['hints']}
+            hints_db = Hints.query.filter_by(chal=chal_db.id).all()
+            for hint_db in hints_db:
+                if hint_db.type in hints:
+                    # the hint is being updated
+                    hint_db.hint = hints[hint_db.type]['hint']
+                    hint_db.cost = hints[hint_db.type]['cost']
+                    del hints[hint_db.type]
+                else:
+                    # the hint is being deleted - delete the hint and any related unlocks
+                    print "  Removing hint {:d}".format(hint_db.type)
+                    Unlocks.query.filter_by(model='hints', itemid=hint_db.id).delete()
+                    Hints.query.filter_by(id=hint_db.id).delete()
+
+            # add new hints
+            for hint in hints.values():
+                print "  Adding hint {:d}".format(hint['id'])
+                hint_db = Hints(chal_db.id, hint['hint'], cost=hint['cost'], type=hint['id'])
+                db.session.add(hint_db)
 
             # hash and compare existing files with the new uploaded files
             hashes_db = {}

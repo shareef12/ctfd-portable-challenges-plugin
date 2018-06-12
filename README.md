@@ -81,7 +81,7 @@ Following is a list of top level keys with their usage.
 
 **description**
 * Type: Multiline text
-* Usage: The the body text of the challenge. If HTML tags are used, they will be rendered.
+* Usage: The the body text of the challenge in markdown. If HTML tags are used, they will be rendered.
 
 **tags** (optional)
 * Type: List of single line text items
@@ -104,6 +104,21 @@ Following is a list of top level keys with their usage.
   * Type: Enum {static, regex}
   * Usage: Specify whether the text should be compared to what the user enters directly, or as a regular expression
   * Default: static
+
+**hints** (optional)
+* Type: List of hint objects
+
+  **id**
+  * Type: Positive integer
+  * Usage: Hint ID unique to this challenge. Used internally to enable hint updates.
+
+  **hint**
+  * Type: Multiline text
+  * Usage: The body text of the hint in markdown. If HTML tags are used, they will be rendered.
+
+  **cost**
+  * Type: Positive integer
+  * Usage: The amount of points that will be deducted for using the hint
 
 **type** (optional)
 * Type: Single line text
