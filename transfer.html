@@ -7,6 +7,8 @@
 .col-md-4 { margin-bottom: 15px; }
 .key-remove-button { margin-top: 10px; }
 .delete-tag { color: white; margin-left: 3px; cursor: pointer; }
+.alert { display: none; }
+.centered { margin: auto; max-width: 300px; }
 </style>
 {% endblock %}
 
@@ -15,35 +17,33 @@
         <br>
         <h1 class="text-center">Challenge Transfer</h1>
 
-        <div class="row">
+        <br/>
+        <div class="row centered">
             <form id="import-form" action="{{ request.script_root }}/admin/yaml" method="POST" enctype="multipart/form-data">
                 <input style="margin: auto;" type="file" name="file" value="file" id="tarfile">
                 <input type="hidden" name="nonce" value="{{ nonce }}">
             </form>
         </div>
 
-        <div class="row">
+        <br/>
+        <div class="row centered">
             <a href="{{ request.script_root }}/admin/yaml" class="btn btn-theme btn-outlined" id="export-challenges">Export</a>
             <button class="btn btn-theme btn-outlined" id="import-challenges">Import</button>
         </div>
 
-        <div class="alerts row">
-            <div hidden id="import-loading" class="alert alert-info" role="alert"><strong>Uploading:</strong> File upload in progress</div>
-            <div hidden id="import-success"class="alert alert-success" role="alert"><strong>Success:</strong> Your challenges have been imported</div>
-            <div hidden id="user-import-error" class="alert alert-danger" role="alert"><strong>Error:</strong> Challenge archive improperly formatted</div>
-            <div hidden id="unknown-import-error" class="alert alert-danger" role="alert"><strong>Error:</strong> Upload failed for unknown reason</div>
+        <br/>
+        <div class="alerts row centered">
+            <div id="import-loading" class="alert alert-info" role="alert"><strong>Uploading:</strong> File upload in progress</div>
+            <div id="import-success" class="alert alert-success" role="alert"><strong>Success:</strong> Your challenges have been imported</div>
+            <div id="user-import-error" class="alert alert-danger" role="alert"><strong>Error:</strong> Challenge archive improperly formatted</div>
+            <div id="unknown-import-error" class="alert alert-danger" role="alert"><strong>Error:</strong> Upload failed for unknown reason</div>
         </div>
     </div>
 {% endblock %}
 
 {% block scripts %}
-    <script src="{{ request.script_root }}/static/admin/js/utils.js"></script>
+    <script src="/themes/admin/static/js/utils.js"></script>
     <script>
-        $("#import-loading").hide()
-        $("#import-success").hide()
-        $("#user-import-error").hide()
-        $("#unknown-import-error").hide()
-
         $("#import-challenges").click( function(e) {
             $("#import-loading").show();
             $("#import-success").hide();
