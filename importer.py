@@ -48,11 +48,20 @@ def process_args(args):
 
 
 class MissingFieldError(Exception):
-    def __init__(self, name):
-        self.name = name
+    def __init__(self, challenge, field):
+        self.challenge = challenge
+        self.field = field
 
     def __str__(self):
-        return "Missing field '{}'".format(self.name)
+        return "Challenge '{}' missing field '{}'".format(self.challenge, self.field)
+
+
+class DuplicateFileError(Exception):
+    def __init__(self, filename):
+        self.filename = filename
+
+    def __str__(self):
+        return "Duplicate challenge filename with different contents: '{}'".format(self.filename)
 
 
 def validate_yaml(chal):
@@ -60,7 +69,10 @@ def validate_yaml(chal):
 
     for req_field in REQ_FIELDS:
         if req_field not in chal:
-            raise MissingFieldError(req_field)
+            if 'name' in chal:
+                raise MissingFieldError(chal['name'].strip(), req_field)
+            else:
+                raise MissingFieldError('<unknown>', req_field)
 
     chal['name'] = chal['name'].strip()
     chal['description'] = chal['description'].strip()
@@ -83,27 +95,28 @@ def validate_yaml(chal):
 
     for flag in chal['flags']:
         if 'flag' not in flag:
-            raise MissingFieldError('flag')
+            raise MissingFieldError(chal['name'], 'flag')
         flag['flag'] = flag['flag'].strip()
         if 'type' not in flag:
             flag['type'] = 'static'
 
     for hint in chal['hints']:
         if 'hint' not in hint:
-            import pdb; pdb.set_trace()
-            raise MissingFieldError('hint')
+            raise MissingFieldError(chal['name'], 'hint')
         if 'cost' not in hint:
-            raise MissingFieldError('cost')
+            raise MissingFieldError(chal['name'], 'cost')
         hint['hint'] = hint['hint'].strip()
 
 
 def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
-    from CTFd.models import db, Challenges, Keys, Tags, Files, Hints, Unlocks
+    from CTFd.models import db, Challenges, Flags, Tags, ChallengeFiles, Hints, Unlocks
     with open(in_file, 'r') as in_stream:
         chals = yaml.safe_load_all(in_stream)
+        chals = [c for c in chals if c]
 
+        # validate the yaml for all challenges and ensure all files have unique names
+        all_files = set()
         for chal in chals:
-            # ensure all required fields are present before adding or updating a challenge
             try:
                 validate_yaml(chal)
             except MissingFieldError as err:
@@ -113,6 +126,14 @@ def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
                     print "Skipping challenge: " + str(err)
                     continue
 
+            for fname in chal['files']:
+                basename = os.path.basename(fname)
+                if basename in all_files:
+                    raise DuplicateFileError(basename)
+                all_files.add(basename)
+
+        # add or update all challenges
+        for chal in chals:
             # if the challenge already exists, update it
             chal_db = Challenges.query.filter_by(name=chal['name']).first()
             if chal_db is not None:
@@ -123,52 +144,47 @@ def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
             else:
                 print "Adding {}".format(chal['name'].encode('utf8'))
                 chal_db = Challenges(
-                    chal['name'],
-                    chal['description'],
-                    chal['value'],
-                    chal['category'])
-            chal_db.type = chal['type']
-            chal_db.hidden = chal['hidden']
+                    name=chal['name'],
+                    description=chal['description'],
+                    value=chal['value'],
+                    category=chal['category'],
+                    type=chal['type'])
+
+            if chal['hidden']:
+                chal_db.state = 'hidden'
 
             db.session.add(chal_db)
             db.session.commit()
 
             # delete all tags and re-add them
-            Tags.query.filter_by(chal=chal_db.id).delete()
+            Tags.query.filter_by(challenge_id=chal_db.id).delete()
             for tag in chal['tags']:
-                tag_dbobj = Tags(chal_db.id, tag)
+                tag_dbobj = Tags(
+                    challenge_id=chal_db.id,
+                    value=tag)
                 db.session.add(tag_dbobj)
 
             # delete all flags and re-add them
-            Keys.query.filter_by(chal=chal_db.id).delete()
+            Flags.query.filter_by(challenge_id=chal_db.id).delete()
             for flag in chal['flags']:
-                flag_db = Keys(chal_db.id, flag['flag'], flag['type'])
+                flag_db = Flags(
+                    challenge_id=chal_db.id,
+                    type=flag['type'],
+                    content=flag['flag'])
                 db.session.add(flag_db)
 
-            # delete or update existing hints
-            hints = {h['id']: h for h in chal['hints']}
-            hints_db = Hints.query.filter_by(chal=chal_db.id).all()
-            for hint_db in hints_db:
-                if hint_db.type in hints:
-                    # the hint is being updated
-                    hint_db.hint = hints[hint_db.type]['hint']
-                    hint_db.cost = hints[hint_db.type]['cost']
-                    del hints[hint_db.type]
-                else:
-                    # the hint is being deleted - delete the hint and any related unlocks
-                    print "  Removing hint {:d}".format(hint_db.type)
-                    Unlocks.query.filter_by(model='hints', itemid=hint_db.id).delete()
-                    Hints.query.filter_by(id=hint_db.id).delete()
-
-            # add new hints
-            for hint in hints.values():
-                print "  Adding hint {:d}".format(hint['id'])
-                hint_db = Hints(chal_db.id, hint['hint'], cost=hint['cost'], type=hint['id'])
+            # delete all hints and re-add them
+            Hints.query.filter_by(challenge_id=chal_db.id).delete()
+            for hint in chal['hints']:
+                hint_db = Hints(
+                    challenge_id=chal_db.id,
+                    content=hint['hint'],
+                    cost=hint['cost'])
                 db.session.add(hint_db)
 
             # hash and compare existing files with the new uploaded files
             hashes_db = {}
-            files_db = Files.query.filter_by(chal=chal_db.id).all()
+            files_db = ChallengeFiles.query.filter_by(challenge_id=chal_db.id).all()
             for file_db in files_db:
                 with open(os.path.join(dst_attachments, file_db.location), 'rb') as f:
                     h = hashlib.md5(f.read()).digest()
@@ -189,13 +205,13 @@ def import_challenges(in_file, dst_attachments, exit_on_error=True, move=False):
             # remove out of date files and add new uploads
             for file_db in hashes_db.values():
                 print "  Removing file {}".format(file_db.location)
-                utils.delete_file(file_db.id)
+                utils.uploads.delete_file(file_db.id)
             for path in to_upload:
                 basename = os.path.basename(path)
                 print "  Adding file {}".format(basename)
                 with open(path, "rb") as f:
                     f = FileStorage(stream=f, filename=basename)
-                    utils.upload_file(file=f, chalid=chal_db.id)
+                    utils.uploads.upload_file(file=f, type="challenge", challenge_id=chal_db.id)
                 if move:
                     os.unlink(path)
 
